@@ -8,20 +8,38 @@ sealed interface JarvisCommand {
 
 object CommandParser {
     private val playPatterns = listOf(
-        Regex("(?:jarvis[,.]?\\s*)?(?:abra\\s+o\\s+spotify\\s+e\\s+)?(?:toque|toca|coloca|reproduza)\\s+(.+)", RegexOption.IGNORE_CASE),
-        Regex("(?:jarvis[,.]?\\s*)?spotify[, ]+(?:toque|toca|coloca|reproduza)\\s+(.+)", RegexOption.IGNORE_CASE)
+        Regex(
+            "(?:jarvis[,.]?\\s*)?(?:(?:abra|abre|abrir)\\s+(?:o\\s+)?spotify\\s*(?:e\\s*)?)?(?:toque|toca|tocar|coloca|coloque|reproduza|reproduzir)\\s+(.+)",
+            RegexOption.IGNORE_CASE
+        ),
+        Regex(
+            "(?:jarvis[,.]?\\s*)?spotify[, ]+(?:toque|toca|tocar|coloca|coloque|reproduza|reproduzir)\\s+(.+)",
+            RegexOption.IGNORE_CASE
+        )
     )
 
     fun parse(input: String): JarvisCommand {
         val text = input.trim()
+
         playPatterns.forEach { regex ->
             val match = regex.find(text)
-            val query = match?.groupValues?.getOrNull(1)?.trim()
-            if (!query.isNullOrBlank()) return JarvisCommand.PlaySpotify(query)
+            val rawQuery = match?.groupValues?.getOrNull(1)?.trim()
+            val query = rawQuery
+                ?.replace(Regex("\\s+(?:no|na)\\s+spotify\\s*$", RegexOption.IGNORE_CASE), "")
+                ?.trim()
+
+            if (!query.isNullOrBlank()) {
+                return JarvisCommand.PlaySpotify(query)
+            }
         }
-        if (text.contains("spotify", ignoreCase = true) &&
+
+        if (
+            text.contains("spotify", ignoreCase = true) &&
             listOf("abre", "abra", "abrir").any { text.contains(it, ignoreCase = true) }
-        ) return JarvisCommand.OpenSpotify
+        ) {
+            return JarvisCommand.OpenSpotify
+        }
+
         return JarvisCommand.Unknown(text)
     }
 }

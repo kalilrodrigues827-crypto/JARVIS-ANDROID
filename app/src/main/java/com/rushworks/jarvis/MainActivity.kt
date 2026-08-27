@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.refreshMediaAccess()
+        viewModel.refreshPermissions()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -79,7 +79,10 @@ private fun JarvisApp(viewModel: JarvisViewModel) {
             onError = viewModel::showError
         )
     }
-    DisposableEffect(Unit) { onDispose { recognizer?.destroy() } }
+
+    DisposableEffect(Unit) {
+        onDispose { recognizer?.destroy() }
+    }
 
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -113,6 +116,7 @@ private fun JarvisApp(viewModel: JarvisViewModel) {
                 Spacer(Modifier.height(22.dp))
                 JarvisCore(state.isListening, state.isBusy)
                 Spacer(Modifier.height(18.dp))
+
                 Text(
                     state.message,
                     color = Color(0xFFC8DAE6),
@@ -121,27 +125,47 @@ private fun JarvisApp(viewModel: JarvisViewModel) {
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 18.dp)
                 )
+
                 Spacer(Modifier.height(22.dp))
+
                 CommandBox(
                     value = state.commandText,
                     onValueChange = viewModel::setCommand,
                     onSend = { viewModel.submitCommand() },
                     onMic = {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        if (
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                        ) {
                             recognizer?.start()
-                        } else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        } else {
+                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
                     },
                     listening = state.isListening,
                     busy = state.isBusy
                 )
+
                 Spacer(Modifier.height(18.dp))
                 SpotifyPanel(state, viewModel)
+
                 if (state.history.isNotEmpty()) {
                     Spacer(Modifier.height(18.dp))
-                    HistoryPanel(state.history) { viewModel.setCommand(it); viewModel.submitCommand(it) }
+                    HistoryPanel(state.history) {
+                        viewModel.setCommand(it)
+                        viewModel.submitCommand(it)
+                    }
                 }
+
                 Spacer(Modifier.height(28.dp))
-                Text("JARVIS // PERSONAL AI SYSTEM • V0.3", color = Color(0xFF536778), fontSize = 10.sp, letterSpacing = 1.6.sp)
+                Text(
+                    "JARVIS // PERSONAL AI SYSTEM • V0.4",
+                    color = Color(0xFF536778),
+                    fontSize = 10.sp,
+                    letterSpacing = 1.6.sp
+                )
                 Spacer(Modifier.height(16.dp))
             }
         }
@@ -150,11 +174,16 @@ private fun JarvisApp(viewModel: JarvisViewModel) {
 
 @Composable
 private fun Header(state: JarvisUiState) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Column {
             Text("JARVIS", fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp)
             Text("PERSONAL INTELLIGENCE", fontSize = 9.sp, color = Color(0xFF7F99AA), letterSpacing = 2.sp)
         }
+
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(50))
@@ -163,7 +192,15 @@ private fun Header(state: JarvisUiState) {
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(Modifier.size(7.dp).background(if (state.status == "ATENÇÃO") Color(0xFFFFB86B) else Color(0xFF3CE6B1), CircleShape))
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .background(
+                        if (state.status == "ATENÇÃO") Color(0xFFFFB86B)
+                        else Color(0xFF3CE6B1),
+                        CircleShape
+                    )
+            )
             Spacer(Modifier.width(7.dp))
             Text(state.status, fontSize = 9.sp, color = Color(0xFFB7FBE7), letterSpacing = 1.sp)
         }
@@ -176,64 +213,140 @@ private fun JarvisCore(listening: Boolean, busy: Boolean) {
     val pulse by transition.animateFloat(
         initialValue = 0.92f,
         targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(tween(if (busy) 550 else 1500), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(
+            tween(if (busy) 550 else 1500),
+            RepeatMode.Reverse
+        ),
         label = "pulse"
     )
+
     Box(Modifier.size(210.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
-            val c = center
             val base = size.minDimension / 2
             drawCircle(Color(0x0C67DFFF), radius = base * 0.96f)
             drawCircle(Color(0x2867DFFF), radius = base * 0.78f, style = Stroke(width = 1.3f))
-            drawArc(Color(0xFF79D9FF), -65f, 115f, false, topLeft = Offset(base*.22f, base*.22f), size = Size(base*1.56f, base*1.56f), style = Stroke(width = 4f, cap = StrokeCap.Round))
-            drawArc(Color(0xFF7588FF), 130f, 95f, false, topLeft = Offset(base*.34f, base*.34f), size = Size(base*1.32f, base*1.32f), style = Stroke(width = 2f, cap = StrokeCap.Round))
+            drawArc(
+                Color(0xFF79D9FF),
+                -65f,
+                115f,
+                false,
+                topLeft = Offset(base * .22f, base * .22f),
+                size = Size(base * 1.56f, base * 1.56f),
+                style = Stroke(width = 4f, cap = StrokeCap.Round)
+            )
+            drawArc(
+                Color(0xFF7588FF),
+                130f,
+                95f,
+                false,
+                topLeft = Offset(base * .34f, base * .34f),
+                size = Size(base * 1.32f, base * 1.32f),
+                style = Stroke(width = 2f, cap = StrokeCap.Round)
+            )
         }
+
         Box(
             Modifier
                 .size((104 * pulse).dp)
                 .clip(CircleShape)
-                .background(Brush.radialGradient(listOf(Color(0xFFB8EEFF), Color(0xFF438DE7), Color(0xFF182B56))))
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            Color(0xFFB8EEFF),
+                            Color(0xFF438DE7),
+                            Color(0xFF182B56)
+                        )
+                    )
+                )
                 .border(1.dp, Color(0xFFBEEFFF), CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Text(if (listening) "●●●" else "J", fontSize = if (listening) 14.sp else 38.sp, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 3.sp)
+            Text(
+                if (listening) "●●●" else "J",
+                fontSize = if (listening) 14.sp else 38.sp,
+                fontWeight = FontWeight.Black,
+                color = Color.White,
+                letterSpacing = 3.sp
+            )
         }
     }
 }
 
 @Composable
-private fun CommandBox(value: String, onValueChange: (String)->Unit, onSend:()->Unit, onMic:()->Unit, listening:Boolean, busy:Boolean) {
+private fun CommandBox(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onMic: () -> Unit,
+    listening: Boolean,
+    busy: Boolean
+) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color(0xB30B1118)).border(1.dp, Color(0x334E89A9), RoundedCornerShape(24.dp)).padding(12.dp)
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xB30B1118))
+            .border(1.dp, Color(0x334E89A9), RoundedCornerShape(24.dp))
+            .padding(12.dp)
     ) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Ex.: Jarvis, toque Starboy", color = Color(0xFF617786)) },
+            placeholder = {
+                Text(
+                    "Ex.: abre o Spotify e toca Starboy",
+                    color = Color(0xFF617786)
+                )
+            },
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF5DC9FF), unfocusedBorderColor = Color(0x223AA9DA),
-                focusedContainerColor = Color(0x4410202C), unfocusedContainerColor = Color(0x3310202C)
+                focusedBorderColor = Color(0xFF5DC9FF),
+                unfocusedBorderColor = Color(0x223AA9DA),
+                focusedContainerColor = Color(0x4410202C),
+                unfocusedContainerColor = Color(0x3310202C)
             )
         )
+
         Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Button(
                 onClick = onMic,
                 enabled = !busy,
                 modifier = Modifier.weight(1f).height(52.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = if (listening) Color(0xFF175A72) else Color(0xFF10283A))
-            ) { Text(if (listening) "OUVINDO…" else "🎙  FALAR", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (listening) Color(0xFF175A72)
+                    else Color(0xFF10283A)
+                )
+            ) {
+                Text(
+                    if (listening) "OUVINDO…" else "🎙  FALAR",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
+            }
+
             Button(
                 onClick = onSend,
                 enabled = value.isNotBlank() && !busy,
                 modifier = Modifier.weight(1f).height(52.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6A97))
-            ) { Text(if (busy) "PROCESSANDO" else "EXECUTAR", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF1F6A97)
+                )
+            ) {
+                Text(
+                    if (busy) "PROCESSANDO" else "EXECUTAR",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
+            }
         }
     }
 }
@@ -241,60 +354,99 @@ private fun CommandBox(value: String, onValueChange: (String)->Unit, onSend:()->
 @Composable
 private fun SpotifyPanel(state: JarvisUiState, vm: JarvisViewModel) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Color(0xA80C1217)).border(1.dp, Color(0x2735DF8B), RoundedCornerShape(22.dp)).padding(16.dp)
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xA80C1217))
+            .border(1.dp, Color(0x2735DF8B), RoundedCornerShape(22.dp))
+            .padding(16.dp)
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(38.dp).clip(CircleShape).background(Color(0xFF1ED760)), contentAlignment = Alignment.Center) {
-                    Text("♪", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 21.sp)
-                }
-                Spacer(Modifier.width(11.dp))
-                Column {
-                    Text("SPOTIFY DIRECT CONTROL", fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 0.8.sp)
-                    Text(
-                        if (state.mediaControlEnabled) "Sessão de mídia autorizada" else "Permissão necessária para autoplay",
-                        color = if (state.mediaControlEnabled) Color(0xFF6DE6A3) else Color(0xFFFFC56D),
-                        fontSize = 11.sp
-                    )
-                }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF1ED760)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("♪", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 21.sp)
+            }
+
+            Spacer(Modifier.width(11.dp))
+
+            Column {
+                Text(
+                    "SPOTIFY HYBRID CONTROL",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    letterSpacing = 0.6.sp
+                )
+
+                Text(
+                    "Mídia: ${if (state.mediaControlEnabled) "ON" else "OFF"}  •  Automação: ${if (state.accessibilityEnabled) "ON" else "OFF"}",
+                    color = if (state.accessibilityEnabled) Color(0xFF6DE6A3)
+                    else Color(0xFFFFC56D),
+                    fontSize = 10.sp
+                )
             }
         }
 
         Spacer(Modifier.height(12.dp))
 
         if (!state.mediaControlEnabled) {
-            Button(
+            OutlinedButton(
                 onClick = vm::requestMediaAccess,
                 modifier = Modifier.fillMaxWidth().height(46.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B5E43))
+                shape = RoundedCornerShape(14.dp)
             ) {
-                Text("ATIVAR CONTROLE DE MÍDIA", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Text(
+                    "ATIVAR CONTROLE DE MÍDIA",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
             }
             Spacer(Modifier.height(8.dp))
+        }
+
+        if (!state.accessibilityEnabled) {
+            Button(
+                onClick = vm::requestAccessibilityAccess,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF176B48)
+                )
+            ) {
+                Text(
+                    "ATIVAR AUTOMAÇÃO DO SPOTIFY",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
             Text(
-                "Ative “Jarvis Media Control” na tela do Android. É uma configuração única.",
+                "Na Acessibilidade do Android, ative “Jarvis Spotify Automation”. O serviço só recebe eventos do Spotify.",
                 color = Color(0xFF7F99AA),
                 fontSize = 10.sp,
                 lineHeight = 15.sp
             )
         } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    onClick = { vm.submitCommand("abra o spotify") },
-                    modifier = Modifier.weight(1f).height(46.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("ABRIR SPOTIFY", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-                Button(
-                    onClick = { vm.submitCommand("toque Starboy do The Weeknd") },
-                    modifier = Modifier.weight(1f).height(46.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF176B48))
-                ) {
-                    Text("TESTAR AUTOPLAY", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
+            Button(
+                onClick = {
+                    vm.submitCommand("abre o Spotify e toca Starboy do The Weeknd")
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF176B48)
+                )
+            ) {
+                Text(
+                    "TESTAR REPRODUÇÃO COMPLETA",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 
@@ -302,26 +454,56 @@ private fun SpotifyPanel(state: JarvisUiState, vm: JarvisViewModel) {
             Spacer(Modifier.height(13.dp))
             HorizontalDivider(color = Color(0x1FFFFFFF))
             Spacer(Modifier.height(13.dp))
-            Text("ÚLTIMO PEDIDO", fontSize = 9.sp, color = Color(0xFF687D8A), letterSpacing = 1.4.sp)
+            Text(
+                "ÚLTIMO PEDIDO",
+                fontSize = 9.sp,
+                color = Color(0xFF687D8A),
+                letterSpacing = 1.4.sp
+            )
             Spacer(Modifier.height(4.dp))
-            Text(state.nowPlaying, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                state.nowPlaying,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
 
 @Composable
-private fun HistoryPanel(history: List<String>, onTap:(String)->Unit) {
+private fun HistoryPanel(
+    history: List<String>,
+    onTap: (String) -> Unit
+) {
     Column(Modifier.fillMaxWidth()) {
-        Text("COMANDOS RECENTES", fontSize = 10.sp, color = Color(0xFF6B8292), letterSpacing = 1.5.sp)
+        Text(
+            "COMANDOS RECENTES",
+            fontSize = 10.sp,
+            color = Color(0xFF6B8292),
+            letterSpacing = 1.5.sp
+        )
+
         Spacer(Modifier.height(8.dp))
+
         history.forEach { item ->
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x55111920)).clickable { onTap(item) }.padding(13.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x55111920))
+                    .clickable { onTap(item) }
+                    .padding(13.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("›", color = Color(0xFF68D4FF), fontSize = 20.sp)
                 Spacer(Modifier.width(9.dp))
-                Text(item, color = Color(0xFFB9C9D3), fontSize = 12.sp, maxLines = 1)
+                Text(
+                    item,
+                    color = Color(0xFFB9C9D3),
+                    fontSize = 12.sp,
+                    maxLines = 1
+                )
             }
         }
     }

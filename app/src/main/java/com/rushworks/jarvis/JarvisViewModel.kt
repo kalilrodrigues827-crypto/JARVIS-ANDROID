@@ -14,6 +14,7 @@ data class JarvisUiState(
     val isBusy: Boolean = false,
     val spotifyReady: Boolean = true,
     val mediaControlEnabled: Boolean = false,
+    val accessibilityEnabled: Boolean = false,
     val nowPlaying: String? = null,
     val history: List<String> = emptyList()
 )
@@ -22,18 +23,26 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
     private val music = MusicController(app)
 
     private val _state = MutableStateFlow(
-        JarvisUiState(mediaControlEnabled = music.hasMediaAccess())
+        JarvisUiState(
+            mediaControlEnabled = music.hasMediaAccess(),
+            accessibilityEnabled = music.hasAccessibilityAccess()
+        )
     )
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
 
-    fun refreshMediaAccess() {
+    fun refreshPermissions() {
         _state.value = _state.value.copy(
-            mediaControlEnabled = music.hasMediaAccess()
+            mediaControlEnabled = music.hasMediaAccess(),
+            accessibilityEnabled = music.hasAccessibilityAccess()
         )
     }
 
     fun requestMediaAccess() {
         music.openMediaAccessSettings()
+    }
+
+    fun requestAccessibilityAccess() {
+        music.openAccessibilitySettings()
     }
 
     fun setCommand(text: String) {
@@ -77,27 +86,37 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = _state.value.copy(
                     isBusy = true,
                     status = "EXECUTANDO",
-                    message = "Tentando reprodução direta de “${parsed.query}”..."
+                    message = "Procurando e tentando tocar “${parsed.query}”..."
                 )
 
                 music.playOnSpotify(parsed.query) { result ->
                     when (result) {
-                        SpotifyPlayResult.DirectRequestSent -> {
+                        SpotifyPlayResult.DirectPlaybackConfirmed -> {
                             _state.value = _state.value.copy(
                                 isBusy = false,
                                 status = "ONLINE",
                                 nowPlaying = parsed.query,
                                 mediaControlEnabled = true,
-                                message = "Comando direto enviado ao Spotify."
+                                message = "Spotify confirmou a reprodução."
+                            )
+                        }
+
+                        SpotifyPlayResult.AutomationStarted -> {
+                            _state.value = _state.value.copy(
+                                isBusy = false,
+                                status = "EXECUTANDO",
+                                nowPlaying = parsed.query,
+                                accessibilityEnabled = true,
+                                message = "O controle direto foi ignorado. Automação do Spotify ativada."
                             )
                         }
 
                         SpotifyPlayResult.SearchOpened -> {
                             _state.value = _state.value.copy(
                                 isBusy = false,
-                                status = "ONLINE",
+                                status = "ATENÇÃO",
                                 nowPlaying = parsed.query,
-                                message = "Não encontrei uma sessão controlável. Abri a busca no Spotify como fallback."
+                                message = "Abri a busca, mas não consegui confirmar a reprodução."
                             )
                         }
 
@@ -106,7 +125,16 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
                                 isBusy = false,
                                 status = "ATENÇÃO",
                                 mediaControlEnabled = false,
-                                message = "Ative o Controle de Mídia do Jarvis uma vez para eu controlar o Spotify diretamente."
+                                message = "Ative o Controle de Mídia para melhorar a reprodução direta."
+                            )
+                        }
+
+                        SpotifyPlayResult.NeedsAccessibility -> {
+                            _state.value = _state.value.copy(
+                                isBusy = false,
+                                status = "ATENÇÃO",
+                                accessibilityEnabled = false,
+                                message = "Ative a Automação do Spotify. Ela é o fallback que toca a música quando o Spotify ignora o controle direto."
                             )
                         }
                     }
@@ -116,7 +144,7 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
             is JarvisCommand.Unknown -> {
                 _state.value = _state.value.copy(
                     status = "ONLINE",
-                    message = "V0.3 pronta para Spotify. Ex.: “Jarvis, toque Starboy do The Weeknd”."
+                    message = "V0.4 entende frases como “abre o Spotify e toca Starboy”, “tocar Starboy” e “reproduzir Starboy”."
                 )
             }
         }
