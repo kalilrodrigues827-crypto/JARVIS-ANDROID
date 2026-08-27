@@ -50,7 +50,17 @@ class SpotifyAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return retry(query)
 
         val nodes = mutableListOf<AccessibilityNodeInfo>()
+        android.util.Log.d("JARVIS_SPOTIFY", "=== SPOTIFY TREE | query=$query ===")
         collectNodes(root, nodes)
+
+        nodes.forEachIndexed { index, node ->
+            val rect = Rect()
+            node.getBoundsInScreen(rect)
+            android.util.Log.d(
+                "JARVIS_SPOTIFY",
+                "#$index text=${node.text} desc=${node.contentDescription} clickable=${node.isClickable} editable=${node.isEditable} bounds=$rect"
+            )
+        }
 
         val queryTokens = usefulTokens(query)
 
