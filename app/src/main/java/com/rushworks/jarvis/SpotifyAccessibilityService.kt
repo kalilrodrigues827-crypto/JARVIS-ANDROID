@@ -30,7 +30,11 @@ class SpotifyAccessibilityService : AccessibilityService() {
         if (event?.packageName?.toString() != SPOTIFY_PACKAGE) return
 
         val query = pendingQuery(this) ?: return
-        scheduleAttempt(query, if (attempts == 0) 700 else 350)
+
+        scheduleAttempt(
+            query,
+            if (attempts == 0) 900 else 450
+        )
     }
 
     override fun onInterrupt() = Unit
@@ -50,86 +54,66 @@ class SpotifyAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return retry(query)
 
         val nodes = mutableListOf<AccessibilityNodeInfo>()
-        android.util.Log.d("JARVIS_SPOTIFY", "=== SPOTIFY TREE | query=$query ===")
         collectNodes(root, nodes)
 
-        nodes.forEachIndexed { index, node ->
-            val rect = Rect()
-            node.getBoundsInScreen(rect)
-            android.util.Log.d(
-                "JARVIS_SPOTIFY",
-                "#$index text=${node.text} desc=${node.contentDescription} clickable=${node.isClickable} editable=${node.isEditable} bounds=$rect"
-            )
-        }
+        val screenHeight = resources.displayMetrics.heightPixels
 
-        val queryTokens = usefulTokens(query)
+        val firstMusicNode = nodes
+            .filter { node ->
+                if (!node.isVisibleToUser || node.isEditable) {
+                    return@filter false
+                }
 
-        val candidates = nodes.filter { node ->
-            if (!node.isVisibleToUser) return@filter false
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
 
-            val text = buildString {
-                append(node.text?.toString().orEmpty())
-                append(" ")
-                append(node.contentDescription?.toString().orEmpty())
+                if (
+                    rect.width() <= 0 ||
+                    rect.height() <= 0 ||
+                    rect.top < screenHeight * 0.12 ||
+                    rect.bottom > screenHeight * 0.88
+                ) {
+                    return@filter false
+                }
+
+                val text = normalize(
+                    node.text?.toString().orEmpty() +
+                        " " +
+                        node.contentDescription?.toString().orEmpty()
+                )
+
+                text
+                    .split(" ")
+                    .contains("musica")
+            }
+            .minByOrNull { node ->
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                rect.top
             }
 
-            val normalized = normalize(text)
+        if (firstMusicNode != null) {
 
-            queryTokens.isNotEmpty() &&
-                queryTokens.count { normalized.contains(it) }.toDouble() /
-                queryTokens.size >= 0.60
-        }.sortedBy {
-            val rect = Rect()
-            it.getBoundsInScreen(rect)
-            rect.top
-        }
-
-        for (candidate in candidates) {
-            val candidateText = normalize(
-                candidate.text?.toString().orEmpty() + " " +
-                    candidate.contentDescription?.toString().orEmpty()
-            )
-
-            if (
-                candidateText in setOf(
-                    "musicas",
-                    "videos",
-                    "albuns",
-                    "playlists",
-                    "podcasts"
-                )
-            ) continue
-
-            var current: AccessibilityNodeInfo? = candidate
+            var current: AccessibilityNodeInfo? = firstMusicNode
 
             repeat(8) {
                 val node = current ?: return@repeat
 
-                if (node.isClickable && node.isVisibleToUser) {
-                    if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                        success()
-                        return
-                    }
+                if (
+                    node.isVisibleToUser &&
+                    node.isClickable &&
+                    node.performAction(
+                        AccessibilityNodeInfo.ACTION_CLICK
+                    )
+                ) {
+                    success()
+                    return
                 }
 
                 current = node.parent
             }
 
-            if (tapNode(candidate)) {
-                success()
-                return
-            }
-        }
-
-        /*
-         * Spotify sometimes exposes the song title to Accessibility,
-         * but not the complete result row as clickable.
-         *
-         * If we already waited for the results and found no usable
-         * clickable node, tap the first matching title directly.
-         */
-        if (attempts >= 2 && candidates.isNotEmpty()) {
-            if (tapNode(candidates.first())) {
+            if (tapMusicRow(firstMusicNode)) {
                 success()
                 return
             }
@@ -138,14 +122,25 @@ class SpotifyAccessibilityService : AccessibilityService() {
         retry(query)
     }
 
-    private fun tapNode(node: AccessibilityNodeInfo): Boolean {
+    private fun tapMusicRow(node: AccessibilityNodeInfo): Boolean {
         val rect = Rect()
         node.getBoundsInScreen(rect)
 
-        if (rect.width() <= 0 || rect.height() <= 0) return false
+        if (rect.width() <= 0 || rect.height() <= 0) {
+            return false
+        }
+
+        val screenWidth = resources.displayMetrics.widthPixels
+
+        /*
+         * Clica na região central-esquerda da linha.
+         * Evita os três pontinhos e o botão + do Spotify.
+         */
+        val tapX = screenWidth * 0.40f
+        val tapY = rect.exactCenterY()
 
         val path = Path().apply {
-            moveTo(rect.exactCenterX(), rect.exactCenterY())
+            moveTo(tapX, tapY)
         }
 
         val gesture = GestureDescription.Builder()
@@ -153,7 +148,7 @@ class SpotifyAccessibilityService : AccessibilityService() {
                 GestureDescription.StrokeDescription(
                     path,
                     0,
-                    100
+                    120
                 )
             )
             .build()
@@ -189,40 +184,37 @@ class SpotifyAccessibilityService : AccessibilityService() {
         attempts = 0
     }
 
-    private fun usefulTokens(text: String): List<String> {
-        val ignored = setOf(
-            "a", "o", "as", "os",
-            "um", "uma",
-            "de", "da", "do", "das", "dos",
-            "e", "no", "na", "em",
-            "the", "of", "and",
-            "musica", "song",
-            "toca", "toque", "tocar",
-            "jarvis", "spotify"
-        )
-
-        return normalize(text)
-            .split(Regex("\\s+"))
-            .filter {
-                it.length >= 2 && it !in ignored
-            }
-            .distinct()
-    }
-
     private fun normalize(value: String): String {
         return Normalizer
-            .normalize(value.lowercase(), Normalizer.Form.NFD)
-            .replace(Regex("\\p{Mn}+"), "")
-            .replace(Regex("[^a-z0-9 ]"), " ")
-            .replace(Regex("\\s+"), " ")
+            .normalize(
+                value.lowercase(),
+                Normalizer.Form.NFD
+            )
+            .replace(
+                Regex("\\p{Mn}+"),
+                ""
+            )
+            .replace(
+                Regex("[^a-z0-9 ]"),
+                " "
+            )
+            .replace(
+                Regex("\\s+"),
+                " "
+            )
             .trim()
     }
 
     companion object {
 
-        private const val SPOTIFY_PACKAGE = "com.spotify.music"
-        private const val PREFS = "jarvis_spotify_automation"
-        private const val KEY_QUERY = "pending_query"
+        private const val SPOTIFY_PACKAGE =
+            "com.spotify.music"
+
+        private const val PREFS =
+            "jarvis_spotify_automation"
+
+        private const val KEY_QUERY =
+            "pending_query"
 
         fun isEnabled(context: Context): Boolean {
             val enabled = Settings.Secure.getString(
@@ -238,11 +230,17 @@ class SpotifyAccessibilityService : AccessibilityService() {
             return enabled
                 .split(":")
                 .any {
-                    it.equals(component, ignoreCase = true)
+                    it.equals(
+                        component,
+                        ignoreCase = true
+                    )
                 }
         }
 
-        fun requestPlay(context: Context, query: String) {
+        fun requestPlay(
+            context: Context,
+            query: String
+        ) {
 
             val cleaned = query
                 .replace(
@@ -255,34 +253,59 @@ class SpotifyAccessibilityService : AccessibilityService() {
                 .trim()
 
             context
-                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getSharedPreferences(
+                    PREFS,
+                    Context.MODE_PRIVATE
+                )
                 .edit()
-                .putString(KEY_QUERY, cleaned)
+                .putString(
+                    KEY_QUERY,
+                    cleaned
+                )
                 .apply()
 
             val encoded = Uri.encode(cleaned)
 
             val intent = Intent(
                 Intent.ACTION_VIEW,
-                Uri.parse("spotify:search:$encoded")
+                Uri.parse(
+                    "spotify:search:$encoded"
+                )
             ).apply {
                 setPackage(SPOTIFY_PACKAGE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+                )
             }
 
             context.startActivity(intent)
         }
 
-        fun pendingQuery(context: Context): String? {
+        fun pendingQuery(
+            context: Context
+        ): String? {
             return context
-                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getString(KEY_QUERY, null)
-                ?.takeIf { it.isNotBlank() }
+                .getSharedPreferences(
+                    PREFS,
+                    Context.MODE_PRIVATE
+                )
+                .getString(
+                    KEY_QUERY,
+                    null
+                )
+                ?.takeIf {
+                    it.isNotBlank()
+                }
         }
 
-        fun clearPending(context: Context) {
+        fun clearPending(
+            context: Context
+        ) {
             context
-                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getSharedPreferences(
+                    PREFS,
+                    Context.MODE_PRIVATE
+                )
                 .edit()
                 .remove(KEY_QUERY)
                 .apply()
