@@ -1,9 +1,12 @@
 package com.rushworks.jarvis
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Path
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -27,36 +30,38 @@ class SpotifyAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.packageName?.toString() != SPOTIFY_PACKAGE) return
-
         val query = pendingQuery(this) ?: return
-        if (scheduled) return
+        scheduleAttempt(query, if (attempts == 0) 500 else 260)
+    }
 
+    override fun onInterrupt() = Unit
+
+    private fun scheduleAttempt(query: String, delay: Long) {
+        if (scheduled) return
         scheduled = true
         handler.postDelayed({
             scheduled = false
             attemptAutomation(query)
-        }, if (attempts == 0) 550 else 320)
+        }, delay)
     }
-
-    override fun onInterrupt() = Unit
 
     private fun attemptAutomation(query: String) {
         val root = rootInActiveWindow ?: return retry(query)
         val nodes = mutableListOf<AccessibilityNodeInfo>()
         collectNodes(root, nodes)
 
-        // If Spotify opened its search page without filling the query,
-        // fill the editable search field first.
-        val editable = nodes.firstOrNull { it.isEditable }
+        // If an editable search field exists, make sure the requested query is in it.
+        val editable = nodes.firstOrNull { it.isEditable && it.isVisibleToUser }
         if (editable != null) {
-            val current = editable.text?.toString().orEmpty()
-            if (normalize(current) != normalize(query)) {
+            val existing = editable.text?.toString().orEmpty()
+            if (normalize(existing) != normalize(query)) {
                 val args = Bundle().apply {
                     putCharSequence(
                         AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
                         query
                     )
                 }
+
                 if (editable.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
                     attempts++
                     handler.postDelayed({ attemptAutomation(query) }, 650)
@@ -65,32 +70,38 @@ class SpotifyAccessibilityService : AccessibilityService() {
             }
         }
 
+        // Prefer an exact/near-exact text result.
+        val exactNodes = root.findAccessibilityNodeInfosByText(query)
+        for (node in exactNodes) {
+            val target = clickableAncestor(node)
+            if (target != null && clickNode(target)) {
+                clearPending(this)
+                attempts = 0
+                return
+            }
+        }
+
         val queryTokens = usefulTokens(query)
         var bestNode: AccessibilityNodeInfo? = null
         var bestScore = 0.0
 
+        // Score clickable Spotify rows by all text contained in their subtree.
         for (node in nodes) {
-            val raw = listOfNotNull(
-                node.text?.toString(),
-                node.contentDescription?.toString()
-            ).joinToString(" ")
+            if (!node.isVisibleToUser) continue
 
-            if (raw.isBlank()) continue
+            val target = clickableAncestor(node) ?: continue
+            val blob = subtreeText(target, 0, 4)
+            if (blob.isBlank()) continue
 
-            val candidate = clickableAncestor(node) ?: continue
-            val blob = subtreeText(candidate, depth = 0, maxDepth = 3)
             val score = score(queryTokens, blob)
-
             if (score > bestScore) {
                 bestScore = score
-                bestNode = candidate
+                bestNode = target
             }
         }
 
-        // We require a reasonably strong text match so Jarvis does not
-        // randomly click unrelated Spotify controls.
-        if (bestNode != null && bestScore >= 0.66) {
-            if (bestNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+        if (bestNode != null && bestScore >= 0.50) {
+            if (clickNode(bestNode)) {
                 clearPending(this)
                 attempts = 0
                 return
@@ -100,14 +111,34 @@ class SpotifyAccessibilityService : AccessibilityService() {
         retry(query)
     }
 
+    private fun clickNode(node: AccessibilityNodeInfo): Boolean {
+        if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            return true
+        }
+
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+
+        if (rect.width() <= 0 || rect.height() <= 0) return false
+
+        val path = Path().apply {
+            moveTo(rect.exactCenterX(), rect.exactCenterY())
+        }
+
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 80))
+            .build()
+
+        return dispatchGesture(gesture, null, null)
+    }
+
     private fun retry(query: String) {
         attempts++
-        if (attempts <= 10) {
-            handler.postDelayed({ attemptAutomation(query) }, 520)
+        if (attempts <= 14) {
+            scheduleAttempt(query, 420)
         } else {
-            // Leave Spotify on the search results instead of clicking a
-            // low-confidence item.
             attempts = 0
+            // Keep the search screen visible instead of tapping a weak match.
         }
     }
 
@@ -123,11 +154,13 @@ class SpotifyAccessibilityService : AccessibilityService() {
 
     private fun clickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         var current: AccessibilityNodeInfo? = node
-        repeat(6) {
+
+        repeat(7) {
             val item = current ?: return null
             if (item.isClickable && item.isVisibleToUser) return item
             current = item.parent
         }
+
         return null
     }
 
@@ -145,7 +178,9 @@ class SpotifyAccessibilityService : AccessibilityService() {
 
         if (depth == maxDepth) return own
 
-        val children = buildString {
+        return buildString {
+            append(own)
+
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let {
                     append(' ')
@@ -153,15 +188,17 @@ class SpotifyAccessibilityService : AccessibilityService() {
                 }
             }
         }
-
-        return "$own $children"
     }
 
-    private fun score(queryTokens: List<String>, candidate: String): Double {
-        if (queryTokens.isEmpty()) return 0.0
+    private fun score(tokens: List<String>, candidate: String): Double {
+        if (tokens.isEmpty()) return 0.0
+
         val normalizedCandidate = normalize(candidate)
-        val matches = queryTokens.count { normalizedCandidate.contains(it) }
-        return matches.toDouble() / max(1, queryTokens.size)
+        val matches = tokens.count {
+            normalizedCandidate.contains(it)
+        }
+
+        return matches.toDouble() / max(1, tokens.size)
     }
 
     private fun usefulTokens(text: String): List<String> {
@@ -170,7 +207,7 @@ class SpotifyAccessibilityService : AccessibilityService() {
             "de", "da", "do", "das", "dos",
             "e", "no", "na", "em",
             "the", "of", "and",
-            "musica", "música", "song"
+            "musica", "song"
         )
 
         return normalize(text)
@@ -181,7 +218,10 @@ class SpotifyAccessibilityService : AccessibilityService() {
     }
 
     private fun normalize(value: String): String {
-        return Normalizer.normalize(value.lowercase(), Normalizer.Form.NFD)
+        return Normalizer.normalize(
+            value.lowercase(),
+            Normalizer.Form.NFD
+        )
             .replace(Regex("\\p{Mn}+"), "")
             .replace(Regex("[^a-z0-9 ]"), " ")
             .replace(Regex("\\s+"), " ")
@@ -237,7 +277,8 @@ class SpotifyAccessibilityService : AccessibilityService() {
         }
 
         fun pendingQuery(context: Context): String? {
-            return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            return context
+                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(KEY_QUERY, null)
                 ?.takeIf { it.isNotBlank() }
         }

@@ -9,11 +9,11 @@ sealed interface JarvisCommand {
 object CommandParser {
     private val playPatterns = listOf(
         Regex(
-            "(?:jarvis[,.]?\\s*)?(?:(?:abra|abre|abrir)\\s+(?:o\\s+)?spotify\\s*(?:e\\s*)?)?(?:toque|toca|tocar|coloca|coloque|reproduza|reproduzir)\\s+(.+)",
+            "(?:jarvis[,.]?\\s*)?(?:(?:abra|abre|abrir)\\s+(?:o\\s+)?spotify\\s*(?:e\\s*)?)?(?:toque|toca|tocar|coloca|coloque|reproduza|reproduzir|bota|botar)\\s+(.+)",
             RegexOption.IGNORE_CASE
         ),
         Regex(
-            "(?:jarvis[,.]?\\s*)?spotify[, ]+(?:toque|toca|tocar|coloca|coloque|reproduza|reproduzir)\\s+(.+)",
+            "(?:jarvis[,.]?\\s*)?spotify[, ]+(?:toque|toca|tocar|coloca|coloque|reproduza|reproduzir|bota|botar)\\s+(.+)",
             RegexOption.IGNORE_CASE
         )
     )
@@ -21,11 +21,14 @@ object CommandParser {
     fun parse(input: String): JarvisCommand {
         val text = input.trim()
 
-        playPatterns.forEach { regex ->
+        for (regex in playPatterns) {
             val match = regex.find(text)
-            val rawQuery = match?.groupValues?.getOrNull(1)?.trim()
-            val query = rawQuery
-                ?.replace(Regex("\\s+(?:no|na)\\s+spotify\\s*$", RegexOption.IGNORE_CASE), "")
+            val raw = match?.groupValues?.getOrNull(1)?.trim()
+            val query = raw
+                ?.replace(
+                    Regex("\\s+(?:no|na)\\s+spotify\\s*$", RegexOption.IGNORE_CASE),
+                    ""
+                )
                 ?.trim()
 
             if (!query.isNullOrBlank()) {
@@ -35,7 +38,9 @@ object CommandParser {
 
         if (
             text.contains("spotify", ignoreCase = true) &&
-            listOf("abre", "abra", "abrir").any { text.contains(it, ignoreCase = true) }
+            listOf("abre", "abra", "abrir").any {
+                text.contains(it, ignoreCase = true)
+            }
         ) {
             return JarvisCommand.OpenSpotify
         }

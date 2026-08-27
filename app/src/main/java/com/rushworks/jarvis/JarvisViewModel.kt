@@ -12,15 +12,24 @@ data class JarvisUiState(
     val commandText: String = "",
     val isListening: Boolean = false,
     val isBusy: Boolean = false,
-    val spotifyReady: Boolean = true,
     val mediaControlEnabled: Boolean = false,
     val accessibilityEnabled: Boolean = false,
     val nowPlaying: String? = null,
-    val history: List<String> = emptyList()
+    val history: List<String> = emptyList(),
+    val updateStatus: String = "Versão ${BuildConfig.VERSION_NAME}",
+    val updateAvailable: Boolean = false,
+    val updateVersion: String? = null,
+    val checkingUpdate: Boolean = false,
+    val downloadingUpdate: Boolean = false
 )
 
-class JarvisViewModel(app: Application) : AndroidViewModel(app) {
+class JarvisViewModel(
+    app: Application
+) : AndroidViewModel(app) {
+
     private val music = MusicController(app)
+    private val updater = UpdateManager(app)
+    private var pendingUpdate: UpdateInfo? = null
 
     private val _state = MutableStateFlow(
         JarvisUiState(
@@ -28,7 +37,9 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
             accessibilityEnabled = music.hasAccessibilityAccess()
         )
     )
-    val state: StateFlow<JarvisUiState> = _state.asStateFlow()
+
+    val state: StateFlow<JarvisUiState> =
+        _state.asStateFlow()
 
     fun refreshPermissions() {
         _state.value = _state.value.copy(
@@ -46,7 +57,9 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setCommand(text: String) {
-        _state.value = _state.value.copy(commandText = text)
+        _state.value = _state.value.copy(
+            commandText = text
+        )
     }
 
     fun setListening(value: Boolean) {
@@ -64,18 +77,23 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun submitCommand(raw: String = _state.value.commandText) {
+    fun submitCommand(
+        raw: String = _state.value.commandText
+    ) {
         val command = raw.trim()
         if (command.isBlank()) return
 
         _state.value = _state.value.copy(
             commandText = command,
-            history = (listOf(command) + _state.value.history).take(4)
+            history = (
+                listOf(command) + _state.value.history
+                ).take(4)
         )
 
         when (val parsed = CommandParser.parse(command)) {
             is JarvisCommand.OpenSpotify -> {
                 music.openSpotify()
+
                 _state.value = _state.value.copy(
                     status = "ONLINE",
                     message = "Abrindo Spotify."
@@ -86,46 +104,34 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = _state.value.copy(
                     isBusy = true,
                     status = "EXECUTANDO",
-                    message = "Procurando e tentando tocar “${parsed.query}”..."
+                    message = "Tentando tocar “${parsed.query}”..."
                 )
 
                 music.playOnSpotify(parsed.query) { result ->
                     when (result) {
-                        SpotifyPlayResult.DirectPlaybackConfirmed -> {
+                        SpotifyPlayResult.PlaybackConfirmed -> {
                             _state.value = _state.value.copy(
                                 isBusy = false,
                                 status = "ONLINE",
                                 nowPlaying = parsed.query,
-                                mediaControlEnabled = true,
-                                message = "Spotify confirmou a reprodução."
+                                message = "Reprodução confirmada: ${parsed.query}."
                             )
                         }
 
                         SpotifyPlayResult.AutomationStarted -> {
                             _state.value = _state.value.copy(
-                                isBusy = false,
                                 status = "EXECUTANDO",
                                 nowPlaying = parsed.query,
                                 accessibilityEnabled = true,
-                                message = "O controle direto foi ignorado. Automação do Spotify ativada."
+                                message = "Spotify ignorou o comando direto. Usando automação..."
                             )
                         }
 
-                        SpotifyPlayResult.SearchOpened -> {
+                        SpotifyPlayResult.AutomationCouldNotConfirm -> {
                             _state.value = _state.value.copy(
                                 isBusy = false,
                                 status = "ATENÇÃO",
-                                nowPlaying = parsed.query,
-                                message = "Abri a busca, mas não consegui confirmar a reprodução."
-                            )
-                        }
-
-                        SpotifyPlayResult.NeedsMediaAccess -> {
-                            _state.value = _state.value.copy(
-                                isBusy = false,
-                                status = "ATENÇÃO",
-                                mediaControlEnabled = false,
-                                message = "Ative o Controle de Mídia para melhorar a reprodução direta."
+                                message = "A automação tentou tocar a música, mas não consegui confirmar a reprodução."
                             )
                         }
 
@@ -134,7 +140,7 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
                                 isBusy = false,
                                 status = "ATENÇÃO",
                                 accessibilityEnabled = false,
-                                message = "Ative a Automação do Spotify. Ela é o fallback que toca a música quando o Spotify ignora o controle direto."
+                                message = "Ative Jarvis Spotify Automation para permitir o clique automático."
                             )
                         }
                     }
@@ -144,9 +150,85 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
             is JarvisCommand.Unknown -> {
                 _state.value = _state.value.copy(
                     status = "ONLINE",
-                    message = "V0.4 entende frases como “abre o Spotify e toca Starboy”, “tocar Starboy” e “reproduzir Starboy”."
+                    message = "Ex.: “Jarvis, abre o Spotify e toca Starboy do The Weeknd”."
                 )
             }
         }
+    }
+
+    fun checkForUpdate() {
+        _state.value = _state.value.copy(
+            checkingUpdate = true,
+            updateStatus = "Procurando atualização..."
+        )
+
+        updater.checkForUpdate { result ->
+            when (result) {
+                is UpdateCheckResult.Available -> {
+                    pendingUpdate = result.info
+
+                    _state.value = _state.value.copy(
+                        checkingUpdate = false,
+                        updateAvailable = true,
+                        updateVersion = result.info.versionName,
+                        updateStatus = "JARVIS ${result.info.versionName} disponível"
+                    )
+                }
+
+                UpdateCheckResult.UpToDate -> {
+                    pendingUpdate = null
+
+                    _state.value = _state.value.copy(
+                        checkingUpdate = false,
+                        updateAvailable = false,
+                        updateVersion = null,
+                        updateStatus = "Você está na versão mais recente"
+                    )
+                }
+
+                is UpdateCheckResult.Error -> {
+                    _state.value = _state.value.copy(
+                        checkingUpdate = false,
+                        updateStatus = "Erro: ${result.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun installUpdate() {
+        val info = pendingUpdate ?: run {
+            checkForUpdate()
+            return
+        }
+
+        if (!updater.canInstallPackages()) {
+            updater.openInstallPermission()
+
+            _state.value = _state.value.copy(
+                updateStatus = "Autorize “Instalar apps desconhecidos” para o Jarvis e volte."
+            )
+            return
+        }
+
+        _state.value = _state.value.copy(
+            downloadingUpdate = true,
+            updateStatus = "Preparando atualização..."
+        )
+
+        updater.downloadAndInstall(
+            info = info,
+            onStatus = { text ->
+                _state.value = _state.value.copy(
+                    updateStatus = text
+                )
+            },
+            onError = { error ->
+                _state.value = _state.value.copy(
+                    downloadingUpdate = false,
+                    updateStatus = "Erro: $error"
+                )
+            }
+        )
     }
 }
