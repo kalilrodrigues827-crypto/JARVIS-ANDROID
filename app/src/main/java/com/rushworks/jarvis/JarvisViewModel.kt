@@ -13,6 +13,7 @@ data class JarvisUiState(
     val isListening: Boolean = false,
     val isBusy: Boolean = false,
     val spotifyReady: Boolean = true,
+    val mediaControlEnabled: Boolean = false,
     val nowPlaying: String? = null,
     val history: List<String> = emptyList()
 )
@@ -20,8 +21,20 @@ data class JarvisUiState(
 class JarvisViewModel(app: Application) : AndroidViewModel(app) {
     private val music = MusicController(app)
 
-    private val _state = MutableStateFlow(JarvisUiState())
+    private val _state = MutableStateFlow(
+        JarvisUiState(mediaControlEnabled = music.hasMediaAccess())
+    )
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
+
+    fun refreshMediaAccess() {
+        _state.value = _state.value.copy(
+            mediaControlEnabled = music.hasMediaAccess()
+        )
+    }
+
+    fun requestMediaAccess() {
+        music.openMediaAccessSettings()
+    }
 
     fun setCommand(text: String) {
         _state.value = _state.value.copy(commandText = text)
@@ -64,31 +77,46 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = _state.value.copy(
                     isBusy = true,
                     status = "EXECUTANDO",
-                    message = "Pedindo ao Spotify para tocar “${parsed.query}”..."
+                    message = "Tentando reprodução direta de “${parsed.query}”..."
                 )
 
-                music.playOnSpotify(parsed.query)
-                    .onSuccess { autoplayRequested ->
-                        _state.value = _state.value.copy(
-                            isBusy = false,
-                            status = "ONLINE",
-                            nowPlaying = parsed.query,
-                            message = if (autoplayRequested) {
-                                "Comando enviado ao Spotify."
-                            } else {
-                                "Abri a busca no Spotify. O autoplay não estava disponível neste aparelho."
-                            }
-                        )
+                music.playOnSpotify(parsed.query) { result ->
+                    when (result) {
+                        SpotifyPlayResult.DirectRequestSent -> {
+                            _state.value = _state.value.copy(
+                                isBusy = false,
+                                status = "ONLINE",
+                                nowPlaying = parsed.query,
+                                mediaControlEnabled = true,
+                                message = "Comando direto enviado ao Spotify."
+                            )
+                        }
+
+                        SpotifyPlayResult.SearchOpened -> {
+                            _state.value = _state.value.copy(
+                                isBusy = false,
+                                status = "ONLINE",
+                                nowPlaying = parsed.query,
+                                message = "Não encontrei uma sessão controlável. Abri a busca no Spotify como fallback."
+                            )
+                        }
+
+                        SpotifyPlayResult.NeedsMediaAccess -> {
+                            _state.value = _state.value.copy(
+                                isBusy = false,
+                                status = "ATENÇÃO",
+                                mediaControlEnabled = false,
+                                message = "Ative o Controle de Mídia do Jarvis uma vez para eu controlar o Spotify diretamente."
+                            )
+                        }
                     }
-                    .onFailure {
-                        showError(it.message ?: "Não consegui abrir o Spotify.")
-                    }
+                }
             }
 
             is JarvisCommand.Unknown -> {
                 _state.value = _state.value.copy(
                     status = "ONLINE",
-                    message = "Minha V1 entende Spotify. Ex.: “Jarvis, toque Starboy”."
+                    message = "V0.3 pronta para Spotify. Ex.: “Jarvis, toque Starboy do The Weeknd”."
                 )
             }
         }

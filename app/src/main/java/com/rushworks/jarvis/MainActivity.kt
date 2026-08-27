@@ -50,6 +50,11 @@ class MainActivity : ComponentActivity() {
         setContent { JarvisApp(viewModel) }
     }
 
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshMediaAccess()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -136,7 +141,7 @@ private fun JarvisApp(viewModel: JarvisViewModel) {
                     HistoryPanel(state.history) { viewModel.setCommand(it); viewModel.submitCommand(it) }
                 }
                 Spacer(Modifier.height(28.dp))
-                Text("JARVIS // PERSONAL AI SYSTEM • V0.1", color = Color(0xFF536778), fontSize = 10.sp, letterSpacing = 1.6.sp)
+                Text("JARVIS // PERSONAL AI SYSTEM • V0.3", color = Color(0xFF536778), fontSize = 10.sp, letterSpacing = 1.6.sp)
                 Spacer(Modifier.height(16.dp))
             }
         }
@@ -245,12 +250,51 @@ private fun SpotifyPanel(state: JarvisUiState, vm: JarvisViewModel) {
                 }
                 Spacer(Modifier.width(11.dp))
                 Column {
-                    Text("SPOTIFY CONTROL", fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 1.sp)
-                    Text("Controle por comando do Android", color = Color(0xFF6DE6A3), fontSize = 11.sp)
+                    Text("SPOTIFY DIRECT CONTROL", fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 0.8.sp)
+                    Text(
+                        if (state.mediaControlEnabled) "Sessão de mídia autorizada" else "Permissão necessária para autoplay",
+                        color = if (state.mediaControlEnabled) Color(0xFF6DE6A3) else Color(0xFFFFC56D),
+                        fontSize = 11.sp
+                    )
                 }
             }
-            TextButton(onClick = { vm.submitCommand("abra o spotify") }) {
-                Text("ABRIR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        if (!state.mediaControlEnabled) {
+            Button(
+                onClick = vm::requestMediaAccess,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B5E43))
+            ) {
+                Text("ATIVAR CONTROLE DE MÍDIA", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Ative “Jarvis Media Control” na tela do Android. É uma configuração única.",
+                color = Color(0xFF7F99AA),
+                fontSize = 10.sp,
+                lineHeight = 15.sp
+            )
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = { vm.submitCommand("abra o spotify") },
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("ABRIR SPOTIFY", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = { vm.submitCommand("toque Starboy do The Weeknd") },
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF176B48))
+                ) {
+                    Text("TESTAR AUTOPLAY", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
