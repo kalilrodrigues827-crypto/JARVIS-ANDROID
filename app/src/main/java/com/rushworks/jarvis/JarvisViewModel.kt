@@ -20,7 +20,9 @@ data class JarvisUiState(
     val updateAvailable: Boolean = false,
     val updateVersion: String? = null,
     val checkingUpdate: Boolean = false,
-    val downloadingUpdate: Boolean = false
+    val downloadingUpdate: Boolean = false,
+    val userName: String? = null,
+    val needsNameSetup: Boolean = true
 )
 
 class JarvisViewModel(
@@ -30,17 +32,46 @@ class JarvisViewModel(
     private val music = MusicController(app)
     private val appLauncher = AppLauncher(app)
     private val updater = UpdateManager(app)
+
+    private val profilePrefs = app.getSharedPreferences(
+        "jarvis_profile",
+        android.content.Context.MODE_PRIVATE
+    )
+
+    private val savedUserName =
+        profilePrefs.getString("user_name", null)
+
     private var pendingUpdate: UpdateInfo? = null
 
     private val _state = MutableStateFlow(
         JarvisUiState(
             mediaControlEnabled = music.hasMediaAccess(),
-            accessibilityEnabled = music.hasAccessibilityAccess()
+            accessibilityEnabled = music.hasAccessibilityAccess(),
+            userName = savedUserName,
+            needsNameSetup = savedUserName.isNullOrBlank()
         )
     )
 
     val state: StateFlow<JarvisUiState> =
         _state.asStateFlow()
+
+    fun saveUserName(name: String) {
+        val cleaned = name.trim()
+
+        if (cleaned.isBlank()) return
+
+        profilePrefs
+            .edit()
+            .putString("user_name", cleaned)
+            .apply()
+
+        _state.value = _state.value.copy(
+            userName = cleaned,
+            needsNameSetup = false,
+            status = "ONLINE",
+            message = "Muito prazer, $cleaned. JARVIS online."
+        )
+    }
 
     fun refreshPermissions() {
         _state.value = _state.value.copy(
