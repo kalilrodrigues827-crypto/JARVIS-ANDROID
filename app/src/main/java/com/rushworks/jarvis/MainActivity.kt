@@ -76,6 +76,18 @@ private fun JarvisApp(
         mutableStateOf<VoiceRecognizer?>(null)
     }
 
+    var speaker by remember {
+        mutableStateOf<JarvisSpeaker?>(null)
+    }
+
+    var capturingName by remember {
+        mutableStateOf(false)
+    }
+
+    var onboardingStarted by remember {
+        mutableStateOf(false)
+    }
+
     val permissionLauncher =
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
@@ -90,20 +102,69 @@ private fun JarvisApp(
         }
 
     LaunchedEffect(Unit) {
+        speaker = JarvisSpeaker(context)
+
         recognizer = VoiceRecognizer(
             context = context,
             onResult = { text ->
-                viewModel.setCommand(text)
-                viewModel.submitCommand(text)
+                if (capturingName) {
+                    capturingName = false
+
+                    val name = text.trim()
+
+                    viewModel.saveUserName(name)
+
+                    speaker?.speak(
+                        "Muito prazer, $name. JARVIS online."
+                    )
+                } else {
+                    viewModel.setCommand(text)
+                    viewModel.submitCommand(text)
+                }
             },
             onListening = viewModel::setListening,
             onError = viewModel::showError
         )
     }
 
+    LaunchedEffect(
+        state.needsNameSetup,
+        recognizer,
+        speaker
+    ) {
+        if (
+            state.needsNameSetup &&
+            recognizer != null &&
+            speaker != null &&
+            !onboardingStarted
+        ) {
+            onboardingStarted = true
+
+            speaker?.speak(
+                "Qual é o seu nome, senhor?"
+            ) {
+                capturingName = true
+
+                if (
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    recognizer?.start()
+                } else {
+                    permissionLauncher.launch(
+                        Manifest.permission.RECORD_AUDIO
+                    )
+                }
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             recognizer?.destroy()
+            speaker?.shutdown()
         }
     }
 

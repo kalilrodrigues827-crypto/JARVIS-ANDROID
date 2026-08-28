@@ -28,6 +28,7 @@ class JarvisViewModel(
 ) : AndroidViewModel(app) {
 
     private val music = MusicController(app)
+    private val appLauncher = AppLauncher(app)
     private val updater = UpdateManager(app)
     private var pendingUpdate: UpdateInfo? = null
 
@@ -145,6 +146,19 @@ class JarvisViewModel(
                         }
                     }
                 }
+            }
+
+            is JarvisCommand.OpenApp -> {
+                val result = appLauncher.openApp(parsed.appName)
+
+                _state.value = _state.value.copy(
+                    status = if (result.opened) "ONLINE" else "ATENÇÃO",
+                    message = if (result.opened) {
+                        "Abrindo ${result.appName ?: parsed.appName}."
+                    } else {
+                        "Não encontrei o aplicativo ${parsed.appName}."
+                    }
+                )
             }
 
             is JarvisCommand.Unknown -> {
