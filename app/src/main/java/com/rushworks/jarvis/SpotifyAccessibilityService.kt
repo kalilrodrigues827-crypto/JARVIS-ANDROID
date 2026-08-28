@@ -94,24 +94,6 @@ class SpotifyAccessibilityService : AccessibilityService() {
 
         if (firstMusicNode != null) {
 
-            var current: AccessibilityNodeInfo? = firstMusicNode
-
-            repeat(8) {
-                val node = current ?: return@repeat
-
-                if (
-                    node.isVisibleToUser &&
-                    node.isClickable &&
-                    node.performAction(
-                        AccessibilityNodeInfo.ACTION_CLICK
-                    )
-                ) {
-                    success()
-                    return
-                }
-
-                current = node.parent
-            }
 
             if (tapMusicRow(firstMusicNode)) {
                 success()
@@ -148,7 +130,7 @@ class SpotifyAccessibilityService : AccessibilityService() {
                 GestureDescription.StrokeDescription(
                     path,
                     0,
-                    120
+                    50
                 )
             )
             .build()
