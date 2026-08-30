@@ -1,5 +1,5 @@
-                ),
-                size = Size(package com.rushworks.jarvis
+                
+                package com.rushworks.jarvis
 
 import android.Manifest
 import android.content.Intent
