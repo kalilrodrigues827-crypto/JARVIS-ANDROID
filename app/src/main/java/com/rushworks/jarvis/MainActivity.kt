@@ -1,4 +1,5 @@
-package com.rushworks.jarvis
+                ),
+                size = Size(package com.rushworks.jarvis
 
 import android.Manifest
 import android.content.Intent
@@ -18,13 +19,34 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,10 +68,9 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: JarvisViewModel by viewModels()
 
-    override fun onCreate(
-        savedInstanceState: Bundle?
-    ) {
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContent {
             JarvisApp(viewModel)
         }
@@ -71,7 +92,15 @@ private fun JarvisApp(
     viewModel: JarvisViewModel
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
     val context = LocalContext.current
+
+    val core = remember {
+        JarvisCore()
+    }
+
+    val coreState by core.state.collectAsStateWithLifecycle()
+
     var recognizer by remember {
         mutableStateOf<VoiceRecognizer?>(null)
     }
@@ -88,13 +117,23 @@ private fun JarvisApp(
         mutableStateOf(false)
     }
 
+    var showSystemPanel by remember {
+        mutableStateOf(false)
+    }
+
     val permissionLauncher =
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { granted ->
+
             if (granted) {
+                core.setListening()
                 recognizer?.start()
             } else {
+                core.setError(
+                    "Permissão de microfone necessária."
+                )
+
                 viewModel.showError(
                     "Preciso da permissão do microfone."
                 )
@@ -102,29 +141,115 @@ private fun JarvisApp(
         }
 
     LaunchedEffect(Unit) {
+
         speaker = JarvisSpeaker(context)
 
         recognizer = VoiceRecognizer(
             context = context,
+
             onResult = { text ->
+
                 if (capturingName) {
+
                     capturingName = false
 
                     val name = text.trim()
 
                     viewModel.saveUserName(name)
 
+                    core.setSpeaking(
+                        "Muito prazer, $name. JARVIS online."
+                    )
+
                     speaker?.speak(
                         "Muito prazer, $name. JARVIS online."
                     )
-                } else {
-                    viewModel.setCommand(text)
-                    viewModel.submitCommand(text)
+
+                    return@VoiceRecognizer
+                }
+
+                when (
+                    core.interpretSessionIntent(text)
+                ) {
+
+                    JarvisSessionIntent.WAKE -> {
+
+                        core.wake()
+
+                        speaker?.speak(
+                            "Olá, senhor. Como posso ajudá-lo?"
+                        )
+                    }
+
+                    JarvisSessionIntent.SLEEP -> {
+
+                        core.setSpeaking(
+                            "Até logo, senhor."
+                        )
+
+                        speaker?.speak(
+                            "Até logo, senhor."
+                        ) {
+                            core.sleep()
+                        }
+                    }
+
+                    JarvisSessionIntent.NONE -> {
+
+                        core.setThinking()
+
+                        viewModel.setCommand(text)
+
+                        viewModel.submitCommand(text)
+                    }
                 }
             },
-            onListening = viewModel::setListening,
-            onError = viewModel::showError
+
+            onListening = { listening ->
+
+                viewModel.setListening(listening)
+
+                if (listening) {
+                    core.setListening()
+                } else if (!state.isBusy) {
+                    core.setOnline()
+                }
+            },
+
+            onError = { error ->
+
+                core.setError(error)
+
+                viewModel.showError(error)
+            }
         )
+    }
+
+    LaunchedEffect(
+        state.isBusy,
+        state.isListening
+    ) {
+
+        when {
+
+            state.isListening -> {
+                core.setListening()
+            }
+
+            state.isBusy -> {
+                core.setExecuting(
+                    "Executando solicitação."
+                )
+            }
+
+            coreState.mode != JarvisMode.SLEEPING &&
+                coreState.mode != JarvisMode.ERROR -> {
+
+                core.setOnline(
+                    state.message
+                )
+            }
+        }
     }
 
     LaunchedEffect(
@@ -132,17 +257,24 @@ private fun JarvisApp(
         recognizer,
         speaker
     ) {
+
         if (
             state.needsNameSetup &&
             recognizer != null &&
             speaker != null &&
             !onboardingStarted
         ) {
+
             onboardingStarted = true
+
+            core.setSpeaking(
+                "Qual é o seu nome, senhor?"
+            )
 
             speaker?.speak(
                 "Qual é o seu nome, senhor?"
             ) {
+
                 capturingName = true
 
                 if (
@@ -151,301 +283,14 @@ private fun JarvisApp(
                         Manifest.permission.RECORD_AUDIO
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
+
+                    core.setListening()
+
                     recognizer?.start()
+
                 } else {
-                    permissionLauncher.launch(
-                        Manifest.permission.RECORD_AUDIO
-                    )
-                }
-            }
-        }
-    }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            recognizer?.destroy()
-            speaker?.shutdown()
-        }
-    }
-
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            background = Color(0xFF05070A),
-            surface = Color(0xFF0C1118),
-            primary = Color(0xFF77D7FF),
-            secondary = Color(0xFF7A8CFF),
-            onBackground = Color(0xFFEAF7FF),
-            onSurface = Color(0xFFEAF7FF)
-        )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFF10253A),
-                            Color(0xFF071019),
-                            Color(0xFF05070A)
-                        ),
-                        center = Offset(350f, 250f),
-                        radius = 900f
-                    )
-                )
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(
-                        rememberScrollState()
-                    )
-                    .padding(
-                        horizontal = 20.dp,
-                        vertical = 18.dp
-                    ),
-                horizontalAlignment =
-                    Alignment.CenterHorizontally
-            ) {
-                Header(state)
-
-                Spacer(Modifier.height(22.dp))
-
-                JarvisCore(
-                    state.isListening,
-                    state.isBusy
-                )
-
-                Spacer(Modifier.height(18.dp))
-
-                Text(
-                    state.message,
-                    color = Color(0xFFC8DAE6),
-                    fontSize = 15.sp,
-                    lineHeight = 21.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(
-                        horizontal = 18.dp
-                    )
-                )
-
-                Spacer(Modifier.height(22.dp))
-
-                CommandBox(
-                    value = state.commandText,
-                    onValueChange = viewModel::setCommand,
-                    onSend = {
-                        viewModel.submitCommand()
-                    },
-                    onMic = {
-                        if (
-                            ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-                        ) {
-                            recognizer?.start()
-                        } else {
-                            permissionLauncher.launch(
-                                Manifest.permission.RECORD_AUDIO
-                            )
-                        }
-                    },
-                    listening = state.isListening,
-                    busy = state.isBusy
-                )
-
-                Spacer(Modifier.height(18.dp))
-
-                SpotifyPanel(
-                    state,
-                    viewModel
-                )
-
-                Spacer(Modifier.height(18.dp))
-
-                UpdatePanel(
-                    state,
-                    viewModel
-                )
-
-                if (state.history.isNotEmpty()) {
-                    Spacer(Modifier.height(18.dp))
-
-                    HistoryPanel(
-                        state.history
-                    ) {
-                        viewModel.setCommand(it)
-                        viewModel.submitCommand(it)
-                    }
-                }
-
-                Spacer(Modifier.height(28.dp))
-
-                Text(
-                    "JARVIS // PERSONAL AI SYSTEM • V${BuildConfig.VERSION_NAME}",
-                    color = Color(0xFF536778),
-                    fontSize = 10.sp,
-                    letterSpacing = 1.6.sp
-                )
-
-                Spacer(Modifier.height(16.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun Header(
-    state: JarvisUiState
-) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement =
-            Arrangement.SpaceBetween,
-        verticalAlignment =
-            Alignment.CenterVertically
-    ) {
-        Column {
-            Text(
-                "JARVIS",
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 4.sp
-            )
-
-            Text(
-                "PERSONAL INTELLIGENCE",
-                fontSize = 9.sp,
-                color = Color(0xFF7F99AA),
-                letterSpacing = 2.sp
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .clip(
-                    RoundedCornerShape(50)
-                )
-                .background(
-                    Color(0x1516E0A5)
-                )
-                .border(
-                    1.dp,
-                    Color(0x4437E6BE),
-                    RoundedCornerShape(50)
-                )
-                .padding(
-                    horizontal = 12.dp,
-                    vertical = 8.dp
-                ),
-            verticalAlignment =
-                Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier
-                    .size(7.dp)
-                    .background(
-                        if (
-                            state.status ==
-                            "ATENÇÃO"
-                        ) {
-                            Color(0xFFFFB86B)
-                        } else {
-                            Color(0xFF3CE6B1)
-                        },
-                        CircleShape
-                    )
-            )
-
-            Spacer(Modifier.width(7.dp))
-
-            Text(
-                state.status,
-                fontSize = 9.sp,
-                color = Color(0xFFB7FBE7),
-                letterSpacing = 1.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun JarvisCore(
-    listening: Boolean,
-    busy: Boolean
-) {
-    val transition =
-        rememberInfiniteTransition(
-            label = "core"
-        )
-
-    val pulse by transition.animateFloat(
-        initialValue = 0.92f,
-        targetValue = 1.08f,
-        animationSpec =
-            infiniteRepeatable(
-                tween(
-                    if (busy) 550
-                    else 1500
-                ),
-                RepeatMode.Reverse
-            ),
-        label = "pulse"
-    )
-
-    Box(
-        Modifier.size(210.dp),
-        contentAlignment =
-            Alignment.Center
-    ) {
-        Canvas(
-            Modifier.fillMaxSize()
-        ) {
-            val base =
-                size.minDimension / 2
-
-            drawCircle(
-                Color(0x0C67DFFF),
-                radius = base * 0.96f
-            )
-
-            drawCircle(
-                Color(0x2867DFFF),
-                radius = base * 0.78f,
-                style = Stroke(
-                    width = 1.3f
-                )
-            )
-
-            drawArc(
-                Color(0xFF79D9FF),
-                -65f,
-                115f,
-                false,
-                topLeft = Offset(
-                    base * .22f,
-                    base * .22f
-                ),
-                size = Size(
-                    base * 1.56f,
-                    base * 1.56f
-                ),
-                style = Stroke(
-                    width = 4f,
-                    cap = StrokeCap.Round
-                )
-            )
-
-            drawArc(
-                Color(0xFF7588FF),
-                130f,
-                95f,
-                false,
-                topLeft = Offset(
-                    base * .34f,
-                    base * .34f
-                ),
-                size = Size(
+                   
                     base * 1.32f,
                     base * 1.32f
                 ),
